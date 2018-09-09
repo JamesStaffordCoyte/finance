@@ -264,7 +264,7 @@ def register():
         # Log the user in automatically
         row = db.execute("SELECT * FROM users WHERE username = :username",
                           username=request.form.get("username"))
-        session["user_id"] = row[0]["id"]
+        # session["user_id"] = row[0]["id"]
 
         # Redirects User to the homepage
         return redirect("/")
