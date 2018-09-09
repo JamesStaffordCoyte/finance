@@ -1,0 +1,56 @@
+{% extends "layout.html" %}
+
+{% block title %}
+    Home
+
+{% endblock %}
+
+{% block main %}
+
+<div class="container">
+  <table class="table table-hover table-bordered">
+    <thead class="thead-light">
+      <tr>
+        <th>Stock Symbol</th>
+        <th>Company Name</th>
+        <th>Shares</th>
+        <th>Current Price</th>
+        <th>Total Value</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for stock in stocks %}
+        {% for i in stock.symbol %}
+        <tr>
+          <td>{{i}}</td>
+          <td>{{ stock.names[loop.index0] }}</td>
+          <td>{{ stock.shares[loop.index0] }}</td>
+          <td>$ {{ stock.price[loop.index0] }}</td>
+          <td>$ {{ stock.value[loop.index0] }}</td>
+        </tr>
+        {% endfor %}
+
+      {% endfor %}
+      {% for stock in stocks %}
+
+        <tr>
+          <th>Cash Balance</th>
+          <td></td>
+          <td></td>
+          <td></td>
+          <td>$ {{cash}}</td>
+        </tr>
+
+        <tr>
+          <th>Total</th>
+          <td></td>
+          <td></td>
+          <td></td>
+          <td>$ {{total}}</td>
+        </tr>
+      </tbody>
+    {% endfor %}
+  </table>
+</div>
+
+{% endblock %}
