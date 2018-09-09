@@ -34,9 +34,10 @@ Session(app)
 
 # Configure CS50 Library to use SQLite database
 # sqlite:///finance.db
+# postgres://czzvikmcykodyo:e98334d004b1a42bda26225961bb6e77e8ba098097704f1857158e4dcd91ffe6@ec2-54-225-92-1.compute-1.amazonaws.com:5432/ddi73ral6701au
 
 
-db = SQL("postgres://czzvikmcykodyo:e98334d004b1a42bda26225961bb6e77e8ba098097704f1857158e4dcd91ffe6@ec2-54-225-92-1.compute-1.amazonaws.com:5432/ddi73ral6701au")
+db = SQL("sqlite:///finance.db")
 
 
 @app.route("/")
@@ -264,7 +265,8 @@ def register():
         # Log the user in automatically
         row = db.execute("SELECT * FROM users WHERE username = :username",
                           username=request.form.get("username"))
-        # session["user_id"] = row[0]["id"]
+        print(row)
+        session["user_id"] = row[0]["id"]
 
         # Redirects User to the homepage
         return redirect("/")
