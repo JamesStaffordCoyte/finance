@@ -25,7 +25,7 @@
           <td>{{i}}</td>
           <td>{{ stock.shares[loop.index0] }}</td>
           <td>$ {{ stock.price[loop.index0] }}</td>
-          <td>$ {{ stock.transaction_type[loop.index0] }}</td>
+          <td>{{ stock.transaction_type[loop.index0] }}</td>
         </tr>
         {% endfor %}
 

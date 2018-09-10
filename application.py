@@ -1,6 +1,6 @@
 import os
+import sqlite3
 
-from cs50 import SQL
 from flask import Flask, flash, redirect, render_template, request, session
 from flask_session import Session
 from tempfile import mkdtemp
@@ -37,8 +37,8 @@ Session(app)
 # postgres://czzvikmcykodyo:e98334d004b1a42bda26225961bb6e77e8ba098097704f1857158e4dcd91ffe6@ec2-54-225-92-1.compute-1.amazonaws.com:5432/ddi73ral6701au
 
 
-db = SQL("sqlite:///finance.db")
-
+connection = sqlite3.connect("finance.db")
+crsr = connection.cursor()
 
 @app.route("/")
 @login_required
@@ -50,12 +50,14 @@ def index():
     price = []
     value = []
 
-    stock_shares_price = db.execute("SELECT name, stock_symbol, shares, price FROM portfolio WHERE user_id = :id", id=session["user_id"])
-    for element in range(len(stock_shares_price)):
-        companyName = stock_shares_price[element]['name']
-        stock = stock_shares_price[element]['stock_symbol']
-        share = stock_shares_price[element]['shares']
-        current_price = stock_shares_price[element]['price']
+    stock_shares_price = crsr.execute("SELECT name, stock_symbol, shares, price FROM portfolio WHERE user_id=?", (session["user_id"],))
+    stockList = stock_shares_price.fetchall()
+
+    for element in range(len(stockList)):
+        companyName = stockList[element][0]
+        stock = stockList[element][1]
+        share = stockList[element][2]
+        current_price = stockList[element][3]
         if stock in symbols:
             # Add the number of shares to the existing shares at the index corresponding to the stock
             index_a = symbols.index(stock)
@@ -76,14 +78,12 @@ def index():
     # Create a list of dictionaries whose values are lists to be passed to index.html including symbol, shares, price, and values
     portfolio = [{'names': names, 'symbol': symbols, 'shares': shares, 'price': price, 'value': value}]
 
-    cash = db.execute("SELECT cash FROM users WHERE id = :id", id=session["user_id"])
-    # TODO round()
-    cash = round(cash[0]['cash'])
+    # Get cash and round it
+    cash = crsr.execute("SELECT cash FROM users WHERE id=?", (session["user_id"],))
+    cashList = cash.fetchone()
+    cash = round(cashList[0])
 
-    # TODO round()
     total = cash + sum(value)
-
-    print(cash, total)
 
     return render_template("index.html", stocks=portfolio, cash=cash, total=total)
 
@@ -95,7 +95,16 @@ def buy():
         bought = "Bought"
         # Ensure symbol and number of shares was submitted
         symbol = request.form.get("symbol")
-        amount = int(request.form.get("amount"))
+        amount = request.form.get("amount")
+        if not amount:
+            return apology("Please enter an amount")
+        try:
+            amount = int(amount)
+        except ValueError:
+            return apology("Please enter a number")
+        if amount <= 0:
+            return apology("Please enter a number above 0")
+
         if not symbol:
             return apology("Please enter a Symbol")
         while True:
@@ -106,41 +115,44 @@ def buy():
 
         # Look up price
         stock = lookup(symbol)
+        if stock is None:
+            return apology('Please enter a valid symbol')
 
         # Look up cash available
-        cash = db.execute("SELECT cash FROM users WHERE id = :id", id=session["user_id"])
+        cash = crsr.execute("SELECT cash FROM users WHERE id=?", (session["user_id"],))
+        cashList = cash.fetchone()
         # Price to buy the number of stocks requested
         price = stock['price'] * amount
 
-        if cash[0]['cash'] < price:
+        if cashList[0] < price:
             return apology("Sorry. Insufficient Funds")
 
         #add stock to portfolio
-        existant = db.execute("SELECT stock_symbol FROM portfolio WHERE stock_symbol = :stock \
-                        AND user_id = :id", stock=symbol, id=session["user_id"])
-        existing_amount = db.execute("SELECT shares FROM portfolio WHERE stock_symbol = :stock \
-                        AND user_id = :id", stock=symbol, id=session["user_id"])
+        existant = crsr.execute("SELECT stock_symbol FROM portfolio WHERE stock_symbol=:stock \
+                        AND user_id=:id", {"stock": symbol, "id": session["user_id"]})
+        existing_amount = crsr.execute("SELECT shares FROM portfolio WHERE stock_symbol=:stock \
+                        AND user_id=:id", {"stock": symbol, "id": session["user_id"]})
+        fetch_existing_amount = existing_amount.fetchone()
 
-
-        if not existant:
-            db.execute("INSERT INTO portfolio (name, stock_symbol, shares, price, user_id) \
-                        VALUES(:name, :stock_symbol, :shares, :price, :user_id)", name=stock['name'], stock_symbol=stock['symbol'], \
-                        shares=amount, price=stock['price'], user_id=session["user_id"])
+        if fetch_existing_amount is None:
+            crsr.execute("INSERT INTO portfolio (name, stock_symbol, shares, price, user_id) \
+                        VALUES(:name, :stock_symbol, :shares, :price, :user_id)", {"name": stock['name'], "stock_symbol": stock['symbol'], \
+                        "shares": amount, "price": stock['price'], "user_id": session["user_id"]})
         else:
 
-            db.execute("UPDATE portfolio SET shares = :amount WHERE stock_symbol = :stock \
-                        AND user_id = :id", amount=amount+existing_amount[0]['shares'], stock=symbol, id=session["user_id"])
+            crsr.execute("UPDATE portfolio SET shares = :amount WHERE stock_symbol=:stock \
+                        AND user_id=:id", {"amount": amount + fetch_existing_amount[0], "stock": symbol, "id": session["user_id"]})
 
 
         #Subtract cash from user database
-        db.execute("UPDATE users SET cash = cash - :price WHERE id = :id", price=price, id=session["user_id"])
+        crsr.execute("UPDATE users SET cash = cash - :price WHERE id = :id", {"price": price, "id": session["user_id"]})
 
         # ADD transaction to history table
-        db.execute("INSERT INTO history (transaction_type, symbol, shares, price, user_id) \
-                        VALUES (:transaction, :symbol, :shares, :price, :user_id)", transaction=bought, symbol=stock['symbol'], \
-                        shares=amount, price=stock['price'], user_id=session["user_id"])
+        crsr.execute("INSERT INTO history (transaction_type, symbol, shares, price, user_id) \
+                        VALUES (:transaction, :symbol, :shares, :price, :user_id)", {"transaction": bought, "symbol": stock['symbol'], \
+                        "shares": amount, "price": stock['price'], "user_id": session["user_id"]})
 
-
+        connection.commit()
         return redirect("/")
     else:
         return render_template("buy.html")
@@ -155,12 +167,15 @@ def history():
     price = []
     transaction_type = []
 
-    stock_shares_price = db.execute("SELECT transaction_type, symbol, shares, price FROM history WHERE user_id = :id", id=session["user_id"])
-    for element in range(len(stock_shares_price)):
-        symbols.append(stock_shares_price[element]['symbol'])
-        shares.append(stock_shares_price[element]['shares'])
-        transaction_type.append(stock_shares_price[element]['transaction_type'])
-        price.append(stock_shares_price[element]['price'])
+    stock_shares_price = crsr.execute("SELECT transaction_type, symbol, shares, price FROM history WHERE user_id = ?", (session["user_id"],))
+    stockList = stock_shares_price.fetchall()
+    print(stockList)
+    for element in range(len(stockList)):
+        transaction_type.append(stockList[element][0])
+        symbols.append(stockList[element][1])
+        shares.append(stockList[element][2])
+
+        price.append(stockList[element][3])
 
     portfolio = [{'symbol': symbols, 'shares': shares, 'price': price, 'transaction_type': transaction_type}]
 
@@ -185,15 +200,17 @@ def login():
             return apology("must provide password", 403)
 
         # Query database for username
-        rows = db.execute("SELECT * FROM users WHERE username = :username",
-                          username=request.form.get("username"))
+        username = request.form.get("username")
+        rows = crsr.execute("SELECT * FROM users WHERE username=?", (username,))
+        row = rows.fetchone()
 
+        print(check_password_hash(row[2], request.form.get("password")))
         # Ensure username exists and password is correct
-        if len(rows) != 1 or not check_password_hash(rows[0]["hash"], request.form.get("password")):
+        if row[1] != username or not check_password_hash(row[2], request.form.get("password")):
             return apology("invalid username and/or password", 403)
 
         # Remember which user has logged in
-        session["user_id"] = rows[0]["id"]
+        session["user_id"] = row[0]
 
         # Redirect user to home page
         return redirect("/")
@@ -254,20 +271,23 @@ def register():
         hash = generate_password_hash(request.form.get("password"))
 
         # Check whether the username already exists
-        result = db.execute("SELECT * FROM users WHERE username = :username",
-                          username=request.form.get("username"))
-        if result:
+        result = crsr.execute("SELECT * FROM users WHERE username = :username",
+                          {"username": request.form.get("username")})
+        fetch_result = result.fetchone()
+        if fetch_result is not None:
             return apology("Username already exists", 403)
 
         # Insert the new user into the database
-        new_user = db.execute("INSERT INTO users (username, hash) VALUES(:username, :hash)", username=request.form.get("username"), hash=hash)
+        new_user = crsr.execute("INSERT INTO users (username, hash) VALUES(:username, :hash)", {"username": request.form.get("username"), "hash": hash})
 
         # Log the user in automatically
-        row = db.execute("SELECT * FROM users WHERE username = :username",
-                          username=request.form.get("username"))
-        print(row)
-        session["user_id"] = row[0]["id"]
+        row = crsr.execute("SELECT * FROM users WHERE username = ?",
+                          (request.form.get("username"),))
+        fetch_row = row.fetchone()
 
+        session["user_id"] = fetch_row[0]
+
+        connection.commit()
         # Redirects User to the homepage
         return redirect("/")
 
@@ -282,7 +302,12 @@ def sell():
         sold = "Sold"
         # Ensure symbol and number of shares was submitted
         symbol = request.form.get("symbol")
-        amount = int(request.form.get("amount"))
+
+        amount = request.form.get("amount")
+        if not amount:
+            return apology("Please enter an amount")
+        amount = int(amount)
+
         if not symbol:
             return apology("Please enter a Symbol")
         while True:
@@ -293,51 +318,52 @@ def sell():
         # Look up price
         stock = lookup(symbol)
         # Look up cash available
-        cash = db.execute("SELECT cash FROM users WHERE id = :id", id=session["user_id"])
+        cash = crsr.execute("SELECT cash FROM users WHERE id = ?", (session["user_id"],))
         # Price to sell the number of stocks requested
         price = (stock['price']) * amount
 
         #Subtrack stock to portfolio
-        existant = db.execute("SELECT stock_symbol FROM portfolio WHERE stock_symbol = :stock \
-                        AND user_id = :id", stock=symbol, id=session["user_id"])
+        existant = crsr.execute("SELECT stock_symbol FROM portfolio WHERE stock_symbol = :stock \
+                        AND user_id = :id", {"stock": symbol, "id": session["user_id"]})
 
-        existing_amount = db.execute("SELECT shares FROM portfolio WHERE stock_symbol = :stock \
-                        AND user_id = :id", stock=symbol, id=session["user_id"])
+        existing_amount = crsr.execute("SELECT shares FROM portfolio WHERE stock_symbol = :stock \
+                        AND user_id = :id", {"stock": symbol, "id": session["user_id"]})
+        fetch_existing_amount = existing_amount.fetchone()
 
         # Unlikely because of drop down menu
-        if not existant:
+        if fetch_existing_amount is None:
             return apology("You do not own any " + symbol + " stocks")
         # If user tries to sell more shares than you own
-        elif existing_amount[0]['shares'] < amount:
+        elif fetch_existing_amount[0] < amount:
             return apology("You only have " + str(existing_amount[0]['shares']) + " stocks to sell")
         else:
-            db.execute("UPDATE portfolio SET shares = :amount WHERE stock_symbol = :stock \
-                        AND user_id = :id", amount=existing_amount[0]['shares'] - amount, stock=symbol, id=session["user_id"])
-
-        # Delete row if existing amount is 0
+            crsr.execute("UPDATE portfolio SET shares = :amount WHERE stock_symbol = :stock \
+                        AND user_id = :id", {"amount": fetch_existing_amount[0] - amount, "stock":symbol, "id": session["user_id"]})
 
 
         #Subtract cash from user database
-        db.execute("UPDATE users SET cash = cash + :price WHERE id = :id", price=price, id=session["user_id"])
+        crsr.execute("UPDATE users SET cash = cash + :price WHERE id = :id", {"price": price, "id": session["user_id"]})
 
         # ADD stock to history table
-        db.execute("INSERT INTO history (transaction_type, symbol, shares, price, user_id) \
-                        VALUES (:transaction, :symbol, :shares, :price, :user_id)", transaction=sold, symbol=stock['symbol'], \
-                        shares=amount, price=stock['price'], user_id=session["user_id"])
+        crsr.execute("INSERT INTO history (transaction_type, symbol, shares, price, user_id) \
+                        VALUES (:transaction, :symbol, :shares, :price, :user_id)", {"transaction": sold, "symbol": stock['symbol'], \
+                        "shares": amount, "price": stock['price'], "user_id": session["user_id"]})
 
-        print(existing_amount[0]['shares'] - amount)
-        if existing_amount[0]['shares'] - amount == 0:
+        if fetch_existing_amount[0] - amount == 0:
 
-            db.execute("DELETE FROM portfolio WHERE stock_symbol=:stock_symbol AND user_id=:user_id" \
-                        , stock_symbol=stock['symbol'], user_id=session["user_id"])
+            crsr.execute("DELETE FROM portfolio WHERE stock_symbol=:stock_symbol AND user_id=:user_id" \
+                        , {"stock_symbol": stock['symbol'], "user_id": session["user_id"]})
 
+        connection.commit()
         return redirect("/")
     else:
         # List of stocks owned to include in select menu
         stock = []
-        stocks = db.execute("SELECT stock_symbol FROM portfolio WHERE user_id = :id", id=session["user_id"])
-        for element in range(len(stocks)):
-            share = stocks[element]['stock_symbol']
+        stocks = crsr.execute("SELECT stock_symbol FROM portfolio WHERE user_id = ?", (session["user_id"],))
+        fetch_stocks = stocks.fetchall()
+        print(fetch_stocks)
+        for element in range(len(fetch_stocks)):
+            share = fetch_stocks[element][0]
             if share in stock:
                 continue
             else:
@@ -353,3 +379,4 @@ def errorhandler(e):
 # listen for errors
 for code in default_exceptions:
     app.errorhandler(code)(errorhandler)
+
