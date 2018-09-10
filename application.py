@@ -204,7 +204,8 @@ def login():
         rows = crsr.execute("SELECT * FROM users WHERE username=?", (username,))
         row = rows.fetchone()
 
-        print(check_password_hash(row[2], request.form.get("password")))
+        if row is None:
+            return apology('username does not exist')
         # Ensure username exists and password is correct
         if row[1] != username or not check_password_hash(row[2], request.form.get("password")):
             return apology("invalid username and/or password", 403)
