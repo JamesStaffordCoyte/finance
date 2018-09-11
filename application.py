@@ -27,7 +27,6 @@ class RedisSession(CallbackDict, SessionMixin):
         self.new = new
         self.modified = False
 
-
 class RedisSessionInterface(SessionInterface):
     serializer = pickle
     session_class = RedisSession
